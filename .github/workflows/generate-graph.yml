@@ -68,11 +68,25 @@ jobs:
 
       - name: Prepare publish directory
         run: |
+          rm -f graph.html source/graph.html workflow/graph.html
           rm -rf "$PUBLISH_DIR"
           mkdir -p "$PUBLISH_DIR"
 
       - name: Generate graph
-        run: python workflow/generate-graph.py --root source --output "$PUBLISH_DIR/index.html"
+        run: python workflow/generate-graph.py --root source
+
+      - name: Copy graph to publish directory
+        run: |
+          if [ -f source/graph.html ]; then
+            cp source/graph.html "$PUBLISH_DIR/index.html"
+          elif [ -f workflow/graph.html ]; then
+            cp workflow/graph.html "$PUBLISH_DIR/index.html"
+          elif [ -f graph.html ]; then
+            cp graph.html "$PUBLISH_DIR/index.html"
+          else
+            echo "graph.html was not generated" >&2
+            exit 1
+          fi
 
       - name: Verify publish output
         run: test -f "$PUBLISH_DIR/index.html"
