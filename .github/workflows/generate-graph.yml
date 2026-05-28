@@ -43,20 +43,15 @@ jobs:
           wf_ref='${{ github.workflow_ref }}'
           echo "job_workflow_ref=$job_ref"
           echo "workflow_ref=$wf_ref"
-          # Prefer job_workflow_ref (set for reusable workflow calls and points
-          # at this workflow's repo). Fall back to workflow_ref only when this
-          # workflow runs directly in its own repository.
-          if [ -n "$job_ref" ]; then
-            workflow_ref="$job_ref"
+          # This reusable workflow lives in soranjiro/.knowledge. Always
+          # checkout from there so the generator script is available, even
+          # when called from another repository (where github.workflow_ref
+          # points at the caller, not this workflow's repo).
+          repository="soranjiro/.knowledge"
+          # Try to honor the ref the caller pinned this workflow to.
+          if [ -n "$job_ref" ] && [[ "$job_ref" == "$repository"/* ]]; then
+            ref="${job_ref#*@}"
           else
-            workflow_ref="$wf_ref"
-          fi
-          repository="${workflow_ref%%/.github/workflows/*}"
-          ref="${workflow_ref#*@}"
-          # Hard fallback: if parsing failed or repository is empty, use the
-          # known location of this reusable workflow.
-          if [ -z "$repository" ] || [ "$repository" = "$workflow_ref" ]; then
-            repository="soranjiro/.knowledge"
             ref="main"
           fi
           echo "Resolved repository=$repository ref=$ref"
