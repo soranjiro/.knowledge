@@ -3,6 +3,11 @@
 このディレクトリは、個別事例から再利用可能な知見を育てるための知識ベースです。
 何も知らない LLM が、まず `insights/` で大枠を掴み、次に `relations/` で具体的な論点と事例の対応を知り、最後に `writeup/` で個別事例の詳細を確認できる流れを想定します。
 
+## 関連リポジトリ
+
+- Repository: https://github.com/soranjiro/ctf-knowledge
+- Pages: https://soranjiro.github.io/ctf-knowledge/
+
 ## 役割
 
 - `insights/` は topic レベルの一般知識です。特定の writeup や relation を参照せず、見方、切り分け方、定石だけを書きます。

@@ -66,15 +66,18 @@ jobs:
 
       - name: Prepare publish directory
         run: |
-          rm -rf source/.publish
-          mkdir -p source/.publish
+          rm -rf source/site
+          mkdir -p source/site
 
       - name: Generate graph
-        run: python workflow/generate-graph.py --root source --output source/.publish/index.html
+        run: python workflow/generate-graph.py --root source --output source/site/index.html
+
+      - name: Verify publish output
+        run: test -f source/site/index.html
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir: source/.publish
+          publish_dir: source/site
