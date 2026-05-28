@@ -32,6 +32,8 @@ concurrency:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    env:
+      PUBLISH_DIR: ${{ github.workspace }}/site
 
     steps:
       - name: Resolve workflow repository
@@ -66,18 +68,18 @@ jobs:
 
       - name: Prepare publish directory
         run: |
-          rm -rf source/site
-          mkdir -p source/site
+          rm -rf "$PUBLISH_DIR"
+          mkdir -p "$PUBLISH_DIR"
 
       - name: Generate graph
-        run: python workflow/generate-graph.py --root source --output source/site/index.html
+        run: python workflow/generate-graph.py --root source --output "$PUBLISH_DIR/index.html"
 
       - name: Verify publish output
-        run: test -f source/site/index.html
+        run: test -f "$PUBLISH_DIR/index.html"
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir: source/site
+          publish_dir: ${{ github.workspace }}/site
