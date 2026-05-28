@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Knowledge Graph</title>
+    <style>
+        html,body { height:100%; margin:0; background:#0f172a; color:#e6eef8; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+        #canvas { width:100%; height:100vh; display:block; }
+        .node-label { pointer-events: none; font-weight:700; font-size:11px; fill:#e6eef8; opacity:0.92; }
+        .edge { stroke: rgba(255,255,255,0.10); stroke-width:1.2; }
+        .tooltip { position:fixed; background:rgba(2,6,23,0.95); color:#cfe8ff; padding:10px 12px; border-radius:8px; font-size:13px; box-shadow:0 8px 30px rgba(2,6,23,0.6); max-width:360px; display:none; z-index:9999; }
+        .chip { display:inline-block; background:rgba(255,255,255,0.06); color:#dbeafe; padding:4px 8px; border-radius:999px; margin:2px; font-size:11px; }
+        .controls { position:fixed; left:12px; top:12px; z-index:9999; background:rgba(255,255,255,0.05); padding:8px 10px; border-radius:8px; font-size:13px; color:#e6eef8; display:flex; align-items:center; gap:10px; border:1px solid rgba(255,255,255,0.09); }
+        .sidebar-toggle { appearance:none; border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.08); color:#e6eef8; border-radius:6px; font:inherit; padding:4px 8px; cursor:pointer; }
+        .sidebar-toggle:hover { background:rgba(255,255,255,0.14); }
+        .sidebar { position:fixed; top:0; right:0; width:min(390px, 88vw); height:100vh; z-index:9998; background:rgba(2,6,23,0.96); border-left:1px solid rgba(255,255,255,0.10); box-shadow:-16px 0 40px rgba(0,0,0,0.35); transform:translateX(0); transition:transform 160ms ease; display:flex; flex-direction:column; }
+        .sidebar.closed { transform:translateX(100%); }
+        .sidebar-header { height:48px; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 14px; border-bottom:1px solid rgba(255,255,255,0.08); font-weight:800; }
+        .sidebar-close { appearance:none; border:0; background:transparent; color:#cfe8ff; font-size:22px; line-height:1; cursor:pointer; padding:4px 8px; border-radius:6px; }
+        .sidebar-close:hover { background:rgba(255,255,255,0.10); }
+        .tree { overflow:auto; padding:10px 12px 18px; font-size:13px; }
+        .tree details { margin:2px 0; }
+        .tree summary { cursor:pointer; color:#dbeafe; padding:4px 6px; border-radius:6px; user-select:none; }
+        .tree summary:hover { background:rgba(255,255,255,0.08); }
+        .tree-children { margin-left:14px; border-left:1px solid rgba(255,255,255,0.08); padding-left:8px; }
+        .tree-file { display:block; color:#bfdbfe; text-decoration:none; padding:4px 6px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .tree-file:hover { background:rgba(96,165,250,0.16); color:#eff6ff; }
+        .reader { position:fixed; top:0; right:0; width:min(720px, 48vw); height:100vh; z-index:9997; background:#f8fafc; color:#111827; border-left:1px solid #cbd5e1; box-shadow:-18px 0 46px rgba(0,0,0,0.34); transform:translateX(100%); transition:transform 180ms ease; display:flex; flex-direction:column; }
+        .reader.open { transform:translateX(0); }
+        body.reader-open #canvas { width:max(360px, calc(100vw - min(720px, 48vw))); }
+        .reader-header { min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 18px; border-bottom:1px solid #e2e8f0; background:#ffffff; }
+        .reader-title { min-width:0; }
+        .reader-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; }
+        .reader-title span { display:block; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; margin-top:2px; }
+        .reader-close { appearance:none; border:0; background:transparent; color:#334155; font-size:26px; line-height:1; cursor:pointer; padding:4px 8px; border-radius:6px; }
+        .reader-close:hover { background:#e2e8f0; }
+        .reader-body { overflow:auto; padding:28px min(52px, 7vw) 56px; line-height:1.68; font-size:15px; }
+        .reader-body h1 { font-size:30px; line-height:1.25; margin:0 0 20px; }
+        .reader-body h2 { font-size:22px; margin:30px 0 12px; border-bottom:1px solid #e2e8f0; padding-bottom:6px; }
+        .reader-body h3 { font-size:18px; margin:24px 0 8px; }
+        .reader-body p { margin:10px 0; }
+        .reader-body ul, .reader-body ol { padding-left:24px; margin:10px 0; }
+        .reader-body blockquote { margin:14px 0; padding:8px 14px; border-left:4px solid #cbd5e1; color:#475569; background:#f1f5f9; }
+        .reader-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; background:#e2e8f0; border-radius:4px; padding:0.12em 0.32em; }
+        .reader-body pre { background:#0f172a; color:#e2e8f0; border-radius:8px; padding:14px 16px; overflow:auto; }
+        .reader-body pre code { background:transparent; color:inherit; padding:0; }
+        .reader-body a { color:#2563eb; text-decoration:none; }
+        .reader-body a:hover { text-decoration:underline; }
+        .reader-empty { color:#64748b; }
+        .node-circle { stroke: rgba(255,255,255,0.14); stroke-width:1.2; cursor:pointer; }
+        .node-circle:active { cursor:grabbing; }
+        @media (max-width: 900px) {
+            body.reader-open #canvas { width:100%; }
+            .reader { width:100vw; }
+        }
+    </style>
+</head>
+<body>
+    <div class="controls"><button id="sidebar-toggle" class="sidebar-toggle" type="button">Tree</button><span>Nodes: 0 • Edges: 0</span></div>
+    <aside id="sidebar" class="sidebar closed" aria-label="Knowledge files">
+        <div class="sidebar-header">
+            <span>Files</span>
+            <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Close">×</button>
+        </div>
+        <nav id="tree" class="tree"></nav>
+    </aside>
+    <aside id="reader" class="reader" aria-label="Markdown preview">
+        <div class="reader-header">
+            <div class="reader-title">
+                <strong id="reader-heading">No file selected</strong>
+                <span id="reader-path"></span>
+            </div>
+            <button id="reader-close" class="reader-close" type="button" aria-label="Close">×</button>
+        </div>
+        <article id="reader-body" class="reader-body"></article>
+    </aside>
+    <div id="canvas"></div>
+    <div id="tooltip" class="tooltip"></div>
+    <script id="graph-data" type="application/json">{"nodes": [], "edges": []}</script>
+    <script>
+        const data = JSON.parse(document.getElementById('graph-data').textContent);
+        const nodes = data.nodes.map(n => (Object.assign({}, n)));
+        const edges = data.edges.map(e => (Object.assign({}, e)));
+
+        const canvas = document.getElementById('canvas');
+        const w = Math.max(window.innerWidth, 800);
+        const h = Math.max(window.innerHeight, 600);
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('width', '100%');
+        svg.setAttribute('height', '100%');
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        canvas.appendChild(svg);
+        // top-level group; layout is computed once and then fitted into the viewBox.
+        const gAll = document.createElementNS(svgNS, 'g');
+        svg.appendChild(gAll);
+
+        const nodeById = new Map(nodes.map(n => [n.id, n]));
+        const centerX = w / 2;
+        const centerY = h / 2;
+        nodes.forEach(n => {
+            n.x = centerX;
+            n.y = centerY;
+            n.vx = 0; n.vy = 0;
+            // Base radius depending on kind: insights large, writeup small, relations medium
+            const base = n.kind === 'insights' ? 14 : (n.kind === 'writeup' ? 6 : 10);
+            // Scale with degree (number of edges) but cap to avoid huge nodes
+            const scale = Math.sqrt(n.degree || 0) * 3;
+            n.r = Math.max(4, Math.min(48, base + scale));
+        });
+
+        const edgeEls = edges.map(e => {
+            const line = document.createElementNS(svgNS, 'line');
+            line.classList.add('edge');
+            gAll.appendChild(line);
+            return { el: line, data: e };
+        });
+
+        const nodeGroup = nodes.map(n => {
+            const g = document.createElementNS(svgNS, 'g');
+            const c = document.createElementNS(svgNS, 'circle');
+            c.setAttribute('r', String(n.r));
+            c.setAttribute('fill', n.kind === 'insights' ? '#f97316' : (n.kind === 'relations' ? '#06b6d4' : '#60a5fa'));
+            c.classList.add('node-circle');
+            g.appendChild(c);
+            const label = document.createElementNS(svgNS, 'text');
+            label.setAttribute('y', '0');
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('dominant-baseline', 'middle');
+            label.classList.add('node-label');
+            label.textContent = n.displayLabel || '';
+            g.appendChild(label);
+            gAll.appendChild(g);
+            return { g, c, label, node: n };
+        });
+
+        const tooltip = document.getElementById('tooltip');
+
+        function showTooltip(n, clientX, clientY) {
+            const html = [];
+            html.push(`<div style="font-weight:800; font-size:14px; margin-bottom:6px">${escapeHtml(n.title || n.id)}</div>`);
+            if (n.rel_path) html.push(`<div style="color:#9fb7d8; font-size:12px; margin-bottom:6px">${escapeHtml(n.rel_path)}</div>`);
+            const chips = [];
+            if (n.meta && n.meta.category) chips.push(n.meta.category);
+            if (n.meta && n.meta.genre) chips.push(n.meta.genre);
+            if (n.meta && n.meta.difficulty) chips.push(n.meta.difficulty);
+            if (n.meta && Array.isArray(n.meta.tags)) chips.push(...n.meta.tags);
+            if (chips.length) html.push('<div>' + chips.slice(0,6).map(c=>`<span class="chip">${escapeHtml(c)}</span>`).join('') + '</div>');
+            tooltip.innerHTML = html.join('');
+            tooltip.style.display = 'block';
+            const x = Math.min(window.innerWidth - 380, clientX + 12);
+            const y = Math.min(window.innerHeight - 80, clientY + 12);
+            tooltip.style.left = x + 'px';
+            tooltip.style.top = y + 'px';
+        }
+
+        function hideTooltip() { tooltip.style.display = 'none'; }
+
+        function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+        function fileUrl(path) { return encodeURI(path).replaceAll('#', '%23'); }
+        function openNodeFile(node) {
+            if (!node || !node.rel_path) return;
+            openReader(node);
+        }
+        function splitFrontmatter(text) {
+            if (!text.startsWith('---\n')) return text;
+            const end = text.indexOf('\n---\n', 4);
+            return end === -1 ? text : text.slice(end + 5);
+        }
+        function renderInline(text, basePath) {
+            return escapeHtml(text)
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+                    const cleanHref = href.split('#', 1)[0];
+                    const target = cleanHref.endsWith('.md') ? resolveMarkdownPath(cleanHref, basePath) : '';
+                    const attr = target ? ` data-target="${escapeHtml(target)}" href="#"` : ` href="${escapeHtml(href)}" target="_blank" rel="noopener"`;
+                    return `<a${attr}>${label}</a>`;
+                });
+        }
+        function resolveMarkdownPath(href, basePath) {
+            if (href.includes('://') || href.startsWith('#')) return '';
+            const baseParts = (basePath || '').split('/');
+            baseParts.pop();
+            const path = href.split('#', 1)[0].split('?').shift();
+            path.split('/').forEach(part => {
+                if (!part || part === '.') return;
+                if (part === '..') baseParts.pop();
+                else baseParts.push(part);
+            });
+            return baseParts.join('/');
+        }
+        function renderMarkdown(markdown, basePath) {
+            const lines = splitFrontmatter(markdown || '').replace(/\r\n/g, '\n').split('\n');
+            const out = [];
+            let paragraph = [];
+            let list = null;
+            let inCode = false;
+            let codeLines = [];
+
+            function flushParagraph() {
+                if (!paragraph.length) return;
+                out.push(`<p>${renderInline(paragraph.join(' '), basePath)}</p>`);
+                paragraph = [];
+            }
+            function flushList() {
+                if (!list) return;
+                out.push(`<${list.tag}>${list.items.map(item => `<li>${renderInline(item, basePath)}</li>`).join('')}</${list.tag}>`);
+                list = null;
+            }
+
+            lines.forEach(line => {
+                if (line.startsWith('```')) {
+                    if (inCode) {
+                        out.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+                        inCode = false;
+                        codeLines = [];
+                    } else {
+                        flushParagraph();
+                        flushList();
+                        inCode = true;
+                    }
+                    return;
+                }
+                if (inCode) {
+                    codeLines.push(line);
+                    return;
+                }
+                if (!line.trim()) {
+                    flushParagraph();
+                    flushList();
+                    return;
+                }
+                const heading = line.match(/^(#{1,3})\s+(.+)$/);
+                if (heading) {
+                    flushParagraph();
+                    flushList();
+                    const level = heading[1].length;
+                    out.push(`<h${level}>${renderInline(heading[2].trim(), basePath)}</h${level}>`);
+                    return;
+                }
+                const quote = line.match(/^>\s?(.*)$/);
+                if (quote) {
+                    flushParagraph();
+                    flushList();
+                    out.push(`<blockquote>${renderInline(quote[1], basePath)}</blockquote>`);
+                    return;
+                }
+                const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+                const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+                if (ordered || unordered) {
+                    flushParagraph();
+                    const tag = ordered ? 'ol' : 'ul';
+                    if (!list || list.tag !== tag) flushList();
+                    if (!list) list = { tag, items: [] };
+                    list.items.push((ordered || unordered)[1]);
+                    return;
+                }
+                paragraph.push(line.trim());
+            });
+            if (inCode) out.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+            flushParagraph();
+            flushList();
+            return out.join('\n') || '<p class="reader-empty">No content.</p>';
+        }
+        function openReader(node) {
+            const reader = document.getElementById('reader');
+            document.getElementById('reader-heading').textContent = node.title || node.id;
+            document.getElementById('reader-path').textContent = node.rel_path || '';
+            const body = document.getElementById('reader-body');
+            body.innerHTML = renderMarkdown(node.markdown || '', node.rel_path || '');
+            body.querySelectorAll('a[data-target]').forEach(link => {
+                link.addEventListener('click', event => {
+                    event.preventDefault();
+                    const target = nodeById.get(link.getAttribute('data-target'));
+                    if (target) openReader(target);
+                });
+            });
+            document.body.classList.add('reader-open');
+            reader.classList.add('open');
+            document.getElementById('sidebar').classList.add('closed');
+            fitViewBox();
+        }
+        function closeReader() {
+            document.getElementById('reader').classList.remove('open');
+            document.body.classList.remove('reader-open');
+            fitViewBox();
+        }
+
+        // interaction: drag after the static layout has been calculated.
+        let dragging = null;
+        let dragStart = null;
+        nodeGroup.forEach(({g, c, node}) => {
+            c.addEventListener('pointerdown', (e)=>{
+                dragging = node;
+                dragStart = { x: e.clientX, y: e.clientY };
+                c.setPointerCapture(e.pointerId);
+            });
+            c.addEventListener('pointerup', (e)=>{
+                if (dragging===node) {
+                    const moved = dragStart ? Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) : 0;
+                    dragging = null;
+                    dragStart = null;
+                    c.releasePointerCapture(e.pointerId);
+                    if (moved < 5) openNodeFile(node);
+                }
+            });
+            c.addEventListener('pointerenter', (e)=> showTooltip(node, e.clientX, e.clientY));
+            c.addEventListener('pointermove', (e)=> {
+                if(dragging===node){
+                    const point = svg.createSVGPoint();
+                    point.x = e.clientX;
+                    point.y = e.clientY;
+                    const local = point.matrixTransform(svg.getScreenCTM().inverse());
+                    node.x = local.x;
+                    node.y = local.y;
+                    render();
+                }
+                showTooltip(node, e.clientX, e.clientY);
+            });
+            c.addEventListener('pointerleave', hideTooltip);
+        });
+
+        function render() {
+            edgeEls.forEach(({el, data})=>{
+                const s = nodeById.get(data.source);
+                const t = nodeById.get(data.target);
+                if(!s||!t) return;
+                el.setAttribute('x1', s.x); el.setAttribute('y1', s.y);
+                el.setAttribute('x2', t.x); el.setAttribute('y2', t.y);
+            });
+
+            nodeGroup.forEach(({g, c, label, node})=>{
+                g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+                c.setAttribute('r', String(node.r));
+                label.textContent = node.displayLabel || '';
+            });
+        }
+
+        function connectedComponents() {
+            const neighbors = new Map(nodes.map(n => [n.id, []]));
+            edges.forEach(e => {
+                if (!neighbors.has(e.source) || !neighbors.has(e.target)) return;
+                neighbors.get(e.source).push(e.target);
+                neighbors.get(e.target).push(e.source);
+            });
+
+            const seen = new Set();
+            const components = [];
+            nodes.forEach(start => {
+                if (seen.has(start.id)) return;
+                const stack = [start.id];
+                const component = [];
+                seen.add(start.id);
+                while (stack.length) {
+                    const id = stack.pop();
+                    const n = nodeById.get(id);
+                    if (n) component.push(n);
+                    (neighbors.get(id) || []).forEach(next => {
+                        if (!seen.has(next)) {
+                            seen.add(next);
+                            stack.push(next);
+                        }
+                    });
+                }
+                components.push(component);
+            });
+            return components.sort((a, b) => b.length - a.length);
+        }
+
+        function layoutComponent(component) {
+            const ids = new Set(component.map(n => n.id));
+            const componentEdges = edges.filter(e => ids.has(e.source) && ids.has(e.target));
+            const radius = Math.max(80, Math.sqrt(component.length) * 42);
+            component.forEach((n, index) => {
+                const angle = (Math.PI * 2 * index) / Math.max(1, component.length);
+                const degreeBias = n.kind === 'relations' ? 0.35 : (n.kind === 'insights' ? 0.52 : 1);
+                n.x = Math.cos(angle) * radius * degreeBias;
+                n.y = Math.sin(angle) * radius * degreeBias;
+                n.vx = 0;
+                n.vy = 0;
+            });
+
+            const springLength = Math.max(64, Math.min(130, 260 / Math.sqrt(component.length || 1)));
+            for (let step = 0; step < 420; step++) {
+                const alpha = 1 - step / 420;
+                for (let i = 0; i < component.length; i++) {
+                    const a = component[i];
+                    for (let j = i + 1; j < component.length; j++) {
+                        const b = component[j];
+                        let dx = a.x - b.x;
+                        let dy = a.y - b.y;
+                        let d2 = dx * dx + dy * dy + 16;
+                        let d = Math.sqrt(d2);
+                        let force = (900 * alpha) / d2;
+                        let ux = dx / d;
+                        let uy = dy / d;
+                        a.vx += ux * force;
+                        a.vy += uy * force;
+                        b.vx -= ux * force;
+                        b.vy -= uy * force;
+                    }
+                }
+
+                componentEdges.forEach(e => {
+                    const s = nodeById.get(e.source);
+                    const t = nodeById.get(e.target);
+                    if (!s || !t) return;
+                    let dx = t.x - s.x;
+                    let dy = t.y - s.y;
+                    let d = Math.sqrt(dx * dx + dy * dy) || 1;
+                    let targetLength = e.sourceKind === 'writeup' || e.targetKind === 'writeup' ? springLength : springLength * 0.75;
+                    let force = (d - targetLength) * 0.035 * alpha;
+                    let fx = (dx / d) * force;
+                    let fy = (dy / d) * force;
+                    s.vx += fx;
+                    s.vy += fy;
+                    t.vx -= fx;
+                    t.vy -= fy;
+                });
+
+                component.forEach(n => {
+                    n.vx += (0 - n.x) * 0.004 * alpha;
+                    n.vy += (0 - n.y) * 0.004 * alpha;
+                    n.vx *= 0.82;
+                    n.vy *= 0.82;
+                    n.x += n.vx;
+                    n.y += n.vy;
+                });
+            }
+        }
+
+        function boundsFor(component) {
+            return component.reduce((box, n) => ({
+                minX: Math.min(box.minX, n.x - n.r),
+                minY: Math.min(box.minY, n.y - n.r),
+                maxX: Math.max(box.maxX, n.x + n.r),
+                maxY: Math.max(box.maxY, n.y + n.r),
+            }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+        }
+
+        function packComponents() {
+            const components = connectedComponents();
+            components.forEach(layoutComponent);
+
+            const boxes = components.map(component => {
+                const box = boundsFor(component);
+                return {
+                    component,
+                    width: Math.max(80, box.maxX - box.minX),
+                    height: Math.max(80, box.maxY - box.minY),
+                    box,
+                };
+            });
+
+            const gap = 110;
+            const columns = Math.max(1, Math.ceil(Math.sqrt(boxes.length)));
+            const columnWidths = Array(columns).fill(0);
+            boxes.forEach((item, index) => {
+                const column = index % columns;
+                columnWidths[column] = Math.max(columnWidths[column], item.width);
+            });
+
+            const rowHeights = [];
+            boxes.forEach((item, index) => {
+                const row = Math.floor(index / columns);
+                rowHeights[row] = Math.max(rowHeights[row] || 0, item.height);
+            });
+
+            const columnX = [];
+            let cursorX = 0;
+            columnWidths.forEach((width, index) => {
+                columnX[index] = cursorX;
+                cursorX += width + (index === columnWidths.length - 1 ? 0 : gap);
+            });
+
+            const rowY = [];
+            let cursorY = 0;
+            rowHeights.forEach((height, index) => {
+                rowY[index] = cursorY;
+                cursorY += height + (index === rowHeights.length - 1 ? 0 : gap);
+            });
+
+            boxes.forEach((item, index) => {
+                const column = index % columns;
+                const row = Math.floor(index / columns);
+                const offsetX = columnX[column] + (columnWidths[column] - item.width) / 2 - item.box.minX;
+                const offsetY = rowY[row] + (rowHeights[row] - item.height) / 2 - item.box.minY;
+                item.component.forEach(n => {
+                    n.x += offsetX;
+                    n.y += offsetY;
+                });
+            });
+        }
+
+        function fitViewBox() {
+            const padding = 90;
+            const box = boundsFor(nodes);
+            const minX = box.minX - padding;
+            const minY = box.minY - padding;
+            const width = Math.max(320, box.maxX - box.minX + padding * 2);
+            const height = Math.max(240, box.maxY - box.minY + padding * 2);
+            svg.setAttribute('viewBox', `${minX} ${minY} ${width} ${height}`);
+        }
+
+        packComponents();
+        render();
+        fitViewBox();
+        window.addEventListener('resize', fitViewBox);
+
+        function makeTree(paths) {
+            const root = {};
+            paths.forEach(path => {
+                let current = root;
+                path.split('/').forEach((part, index, parts) => {
+                    current[part] ||= index === parts.length - 1 ? path : {};
+                    current = typeof current[part] === 'string' ? current : current[part];
+                });
+            });
+            return root;
+        }
+
+        function renderTreeNode(name, value) {
+            if (typeof value === 'string') {
+                const link = document.createElement('a');
+                link.className = 'tree-file';
+                link.href = '#';
+                link.textContent = name;
+                link.title = value;
+                link.addEventListener('click', event => {
+                    event.preventDefault();
+                    const node = nodeById.get(value);
+                    if (node) openReader(node);
+                });
+                return link;
+            }
+
+            const details = document.createElement('details');
+            details.open = name === 'insights' || name === 'relations' || name === 'writeup';
+            const summary = document.createElement('summary');
+            summary.textContent = name;
+            details.appendChild(summary);
+            const children = document.createElement('div');
+            children.className = 'tree-children';
+            Object.entries(value)
+                .sort(([aName, aValue], [bName, bValue]) => {
+                    const aFile = typeof aValue === 'string';
+                    const bFile = typeof bValue === 'string';
+                    if (aFile !== bFile) return aFile ? 1 : -1;
+                    return aName.localeCompare(bName);
+                })
+                .forEach(([childName, childValue]) => children.appendChild(renderTreeNode(childName, childValue)));
+            details.appendChild(children);
+            return details;
+        }
+
+        const sidebar = document.getElementById('sidebar');
+        const tree = document.getElementById('tree');
+        const treeData = makeTree(nodes.map(n => n.rel_path).sort());
+        Object.entries(treeData).forEach(([name, value]) => tree.appendChild(renderTreeNode(name, value)));
+        document.getElementById('sidebar-toggle').addEventListener('click', () => sidebar.classList.toggle('closed'));
+        document.getElementById('sidebar-close').addEventListener('click', () => sidebar.classList.add('closed'));
+        document.getElementById('reader-close').addEventListener('click', closeReader);
+    </script>
+</body>
+</html>
