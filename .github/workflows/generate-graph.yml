@@ -64,14 +64,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Generate graph
-        run: python workflow/generate-graph.py --root source --output source/graph.html
-
       - name: Prepare publish directory
         run: |
           rm -rf source/.publish
           mkdir -p source/.publish
-          cp source/graph.html source/.publish/index.html
+
+      - name: Generate graph
+        run: python workflow/generate-graph.py --root source --output source/.publish/index.html
 
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
