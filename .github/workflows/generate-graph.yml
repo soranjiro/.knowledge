@@ -1,0 +1,81 @@
+name: Generate Knowledge Graph
+
+on:
+  workflow_call:
+    inputs:
+      source_repository:
+        description: Repository to read content from.
+        required: false
+        type: string
+      source_ref:
+        description: Ref to read content from.
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_repository:
+        description: Repository to read content from.
+        required: false
+        type: string
+      source_ref:
+        description: Ref to read content from.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: generate-graph-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve workflow repository
+        id: workflow-repo
+        run: |
+          workflow_ref="$GITHUB_WORKFLOW_REF"
+          repository="${workflow_ref%%/.github/workflows/*}"
+          ref="${workflow_ref#*@}"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ (github.event_name == 'workflow_call' && inputs.source_repository) || (github.event_name == 'workflow_dispatch' && github.event.inputs.source_repository) || github.repository }}
+          ref: ${{ (github.event_name == 'workflow_call' && inputs.source_ref) || (github.event_name == 'workflow_dispatch' && github.event.inputs.source_ref) || github.ref }}
+          path: source
+          fetch-depth: 0
+
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.workflow-repo.outputs.repository }}
+          ref: ${{ steps.workflow-repo.outputs.ref }}
+          path: workflow
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate graph
+        run: python workflow/generate-graph.py --root source --output source/graph.html
+
+      - name: Prepare publish directory
+        run: |
+          rm -rf source/.publish
+          mkdir -p source/.publish
+          cp source/graph.html source/.publish/index.html
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: source/.publish
