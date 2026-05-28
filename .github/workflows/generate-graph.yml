@@ -39,9 +39,27 @@ jobs:
       - name: Resolve workflow repository
         id: workflow-repo
         run: |
-          workflow_ref='${{ github.job_workflow_ref || github.workflow_ref }}'
+          job_ref='${{ github.job_workflow_ref }}'
+          wf_ref='${{ github.workflow_ref }}'
+          echo "job_workflow_ref=$job_ref"
+          echo "workflow_ref=$wf_ref"
+          # Prefer job_workflow_ref (set for reusable workflow calls and points
+          # at this workflow's repo). Fall back to workflow_ref only when this
+          # workflow runs directly in its own repository.
+          if [ -n "$job_ref" ]; then
+            workflow_ref="$job_ref"
+          else
+            workflow_ref="$wf_ref"
+          fi
           repository="${workflow_ref%%/.github/workflows/*}"
           ref="${workflow_ref#*@}"
+          # Hard fallback: if parsing failed or repository is empty, use the
+          # known location of this reusable workflow.
+          if [ -z "$repository" ] || [ "$repository" = "$workflow_ref" ]; then
+            repository="soranjiro/.knowledge"
+            ref="main"
+          fi
+          echo "Resolved repository=$repository ref=$ref"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
@@ -60,6 +78,11 @@ jobs:
           ref: ${{ steps.workflow-repo.outputs.ref }}
           path: workflow
           fetch-depth: 0
+
+      - name: Verify workflow checkout
+        run: |
+          ls -la workflow
+          test -f workflow/generate-graph.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
