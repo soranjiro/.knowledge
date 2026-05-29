@@ -160,6 +160,32 @@ def group_by_kind(nodes: list[dict[str, object]]) -> dict[str, list[dict[str, ob
         grouped[node['kind']].append(node)
     return grouped
 
+def compute_insight_size_degrees(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -> None:
+    adjacency: dict[str, set[str]] = {str(node['id']): set() for node in nodes}
+
+    for edge in edges:
+        source = str(edge['source'])
+        target = str(edge['target'])
+        adjacency.setdefault(source, set()).add(target)
+        adjacency.setdefault(target, set()).add(source)
+
+    for node in nodes:
+        if node['kind'] != 'insights':
+            continue
+
+        node_id = str(node['id'])
+        neighborhood = {node_id}
+        first_hop = adjacency.get(node_id, set())
+        neighborhood.update(first_hop)
+        for neighbor in first_hop:
+            neighborhood.update(adjacency.get(neighbor, set()))
+
+        node['sizeDegree'] = sum(
+            1
+            for edge in edges
+            if str(edge['source']) in neighborhood and str(edge['target']) in neighborhood
+        )
+
 
 def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -> str:
     # Static full-screen graph layout.
@@ -237,6 +263,7 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
         .reader-body code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.92em; background:#e2e8f0; border-radius:4px; padding:0.12em 0.32em; }
         .reader-body pre { background:#0f172a; color:#e2e8f0; border-radius:8px; padding:14px 16px; overflow:auto; }
         .reader-body pre code { background:transparent; color:inherit; padding:0; }
+        .reader-body img { max-width:100%; height:auto; display:block; margin:16px auto; border-radius:10px; box-shadow:0 8px 24px rgba(15,23,42,0.12); }
         .reader-body a { color:#2563eb; text-decoration:none; }
         .reader-body a:hover { text-decoration:underline; }
         .reader-empty { color:#64748b; }
@@ -295,11 +322,11 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
             n.x = centerX;
             n.y = centerY;
             n.vx = 0; n.vy = 0;
-            // Base radius depending on kind: insights large, writeup small, relations medium
-            const base = n.kind === 'insights' ? 14 : (n.kind === 'writeup' ? 6 : 10);
-            // Scale with degree (number of edges) but cap to avoid huge nodes
-            const scale = Math.sqrt(n.degree || 0) * 3;
-            n.r = Math.max(4, Math.min(48, base + scale));
+            const degreeForSize = n.kind === 'insights' ? (n.sizeDegree || n.degree || 0) : (n.degree || 0);
+            const base = n.kind === 'insights' ? 8 : (n.kind === 'writeup' ? 3 : 10);
+            const scale = Math.sqrt(degreeForSize) * (n.kind === 'writeup' ? 2 : 1.6);
+            const maxRadius = n.kind === 'writeup' ? 16 : 28;
+            n.r = Math.max(3, Math.min(maxRadius, base + scale));
         });
 
         const edgeEls = edges.map(e => {
@@ -360,27 +387,53 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
             const end = text.indexOf('\\n---\\n', 4);
             return end === -1 ? text : text.slice(end + 5);
         }
+        function isExternalHref(href) {
+            return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) || href.startsWith('//');
+        }
+        function resolveContentPath(href, basePath) {
+            const rawHref = (href || '').trim();
+            if (!rawHref || isExternalHref(rawHref) || rawHref.startsWith('#')) return rawHref;
+
+            let suffix = '';
+            let basePart = rawHref;
+            const hashIndex = rawHref.indexOf('#');
+            const queryIndex = rawHref.indexOf('?');
+            let splitIndex = -1;
+            if (hashIndex >= 0 && queryIndex >= 0) splitIndex = Math.min(hashIndex, queryIndex);
+            else splitIndex = Math.max(hashIndex, queryIndex);
+            if (splitIndex >= 0) {
+                basePart = rawHref.slice(0, splitIndex);
+                suffix = rawHref.slice(splitIndex);
+            }
+
+            const resolvedParts = basePart.startsWith('/') ? [] : (basePath || '').split('/').filter(Boolean);
+            if (resolvedParts.length) resolvedParts.pop();
+            basePart.split('/').forEach(part => {
+                if (!part || part === '.') return;
+                if (part === '..') resolvedParts.pop();
+                else resolvedParts.push(part);
+            });
+            return `${resolvedParts.join('/')}${suffix}`;
+        }
         function renderInline(text, basePath) {
             return escapeHtml(text)
                 .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/!\\[([^\\]]*)\\]\\(([^)]+)\\)/g, (match, alt, href) => {
+                    const src = resolveContentPath(href, basePath);
+                    const safeSrc = escapeHtml(fileUrl(src));
+                    const safeAlt = escapeHtml(alt || '');
+                    return `<img src="${safeSrc}" alt="${safeAlt}" loading="lazy" />`;
+                })
                 .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, (match, label, href) => {
-                    const cleanHref = href.split('#', 1)[0];
-                    const target = cleanHref.endsWith('.md') ? resolveMarkdownPath(cleanHref, basePath) : '';
+                    const cleanHref = href.split('#', 1)[0].split('?', 1)[0];
+                    const target = cleanHref.toLowerCase().endsWith('.md') ? resolveMarkdownPath(cleanHref, basePath) : '';
                     const attr = target ? ` data-target="${escapeHtml(target)}" href="#"` : ` href="${escapeHtml(href)}" target="_blank" rel="noopener"`;
                     return `<a${attr}>${label}</a>`;
                 });
         }
         function resolveMarkdownPath(href, basePath) {
-            if (href.includes('://') || href.startsWith('#')) return '';
-            const baseParts = (basePath || '').split('/');
-            baseParts.pop();
-            const path = href.split('#', 1)[0].split('?').shift();
-            path.split('/').forEach(part => {
-                if (!part || part === '.') return;
-                if (part === '..') baseParts.pop();
-                else baseParts.push(part);
-            });
-            return baseParts.join('/');
+            const resolved = resolveContentPath(href, basePath);
+            return resolved.toLowerCase().endsWith('.md') ? resolved : '';
         }
         function renderMarkdown(markdown, basePath) {
             const lines = splitFrontmatter(markdown || '').replace(/\\r\\n/g, '\\n').split('\\n');
@@ -482,11 +535,16 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
         // interaction: drag after the static layout has been calculated.
         let dragging = null;
         let dragStart = null;
+        let simFrames = 0;
+        const SIM_FRAMES_AFTER_DRAG = 90;
+        function kick() { simFrames = SIM_FRAMES_AFTER_DRAG; ensureTicking(); }
         nodeGroup.forEach(({g, c, node}) => {
             c.addEventListener('pointerdown', (e)=>{
                 dragging = node;
                 dragStart = { x: e.clientX, y: e.clientY };
+                node.vx = 0; node.vy = 0;
                 c.setPointerCapture(e.pointerId);
+                kick();
             });
             c.addEventListener('pointerup', (e)=>{
                 if (dragging===node) {
@@ -494,6 +552,7 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                     dragging = null;
                     dragStart = null;
                     c.releasePointerCapture(e.pointerId);
+                    kick();
                     if (moved < 5) openNodeFile(node);
                 }
             });
@@ -506,12 +565,86 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                     const local = point.matrixTransform(svg.getScreenCTM().inverse());
                     node.x = local.x;
                     node.y = local.y;
-                    render();
+                    kick();
                 }
                 showTooltip(node, e.clientX, e.clientY);
             });
             c.addEventListener('pointerleave', hideTooltip);
         });
+
+        // Build neighbor index for cheap spring pass.
+        const neighborEdges = new Map(nodes.map(n => [n.id, []]));
+        edges.forEach(e => {
+            if (neighborEdges.has(e.source)) neighborEdges.get(e.source).push(e);
+            if (neighborEdges.has(e.target)) neighborEdges.get(e.target).push(e);
+        });
+
+        function physicsStep() {
+            const damping = 0.78;
+            const repelK = 420;          // stronger global repulsion
+            const springK = 0.012;       // gentle pull along edges
+            const restLen = 110;
+            const maxStep = 6;
+
+            // Pairwise short-range repulsion (skip far pairs by squared cutoff).
+            const cutoff = 160;
+            const cutoff2 = cutoff * cutoff;
+            for (let i = 0; i < nodes.length; i++) {
+                const a = nodes[i];
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const b = nodes[j];
+                    const dx = a.x - b.x;
+                    const dy = a.y - b.y;
+                    const d2 = dx*dx + dy*dy;
+                    if (d2 > cutoff2 || d2 < 0.0001) continue;
+                    const minD = a.r + b.r + 6;
+                    const d = Math.sqrt(d2);
+                    const overlap = minD - d;
+                    let force = repelK / (d2 + 20);
+                    if (overlap > 0) force += overlap * 0.25; // hard-ish push when overlapping
+                    const ux = dx / d, uy = dy / d;
+                    a.vx += ux * force; a.vy += uy * force;
+                    b.vx -= ux * force; b.vy -= uy * force;
+                }
+            }
+
+            // Edge springs (gentle).
+            edges.forEach(e => {
+                const s = nodeById.get(e.source);
+                const t = nodeById.get(e.target);
+                if (!s || !t) return;
+                const dx = t.x - s.x, dy = t.y - s.y;
+                const d = Math.sqrt(dx*dx + dy*dy) || 0.01;
+                const f = (d - restLen) * springK;
+                const fx = (dx / d) * f, fy = (dy / d) * f;
+                s.vx += fx; s.vy += fy;
+                t.vx -= fx; t.vy -= fy;
+            });
+
+            // Integrate; pin dragging node.
+            nodes.forEach(n => {
+                if (n === dragging) { n.vx = 0; n.vy = 0; return; }
+                n.vx *= damping; n.vy *= damping;
+                if (n.vx > maxStep) n.vx = maxStep; else if (n.vx < -maxStep) n.vx = -maxStep;
+                if (n.vy > maxStep) n.vy = maxStep; else if (n.vy < -maxStep) n.vy = -maxStep;
+                n.x += n.vx; n.y += n.vy;
+            });
+        }
+
+        let ticking = false;
+        function ensureTicking() {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(loop);
+        }
+        function loop() {
+            const active = dragging || simFrames > 0;
+            if (!active) { ticking = false; return; }
+            physicsStep();
+            render();
+            if (!dragging) simFrames--;
+            requestAnimationFrame(loop);
+        }
 
         function render() {
             edgeEls.forEach(({el, data})=>{
@@ -563,17 +696,32 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
         function layoutComponent(component) {
             const ids = new Set(component.map(n => n.id));
             const componentEdges = edges.filter(e => ids.has(e.source) && ids.has(e.target));
-            const radius = Math.max(80, Math.sqrt(component.length) * 42);
+            const radius = Math.max(150, Math.sqrt(component.length) * 68);
             component.forEach((n, index) => {
                 const angle = (Math.PI * 2 * index) / Math.max(1, component.length);
-                const degreeBias = n.kind === 'relations' ? 0.35 : (n.kind === 'insights' ? 0.52 : 1);
+                const degreeBias = n.kind === 'relations' ? 0.62 : (n.kind === 'insights' ? 1.85 : 1);
                 n.x = Math.cos(angle) * radius * degreeBias;
                 n.y = Math.sin(angle) * radius * degreeBias;
                 n.vx = 0;
                 n.vy = 0;
             });
 
-            const springLength = Math.max(64, Math.min(130, 260 / Math.sqrt(component.length || 1)));
+            const insightNodes = component
+                .filter(n => n.kind === 'insights')
+                .sort((a, b) => String(a.title).localeCompare(String(b.title)));
+            const insightRadius = radius * 4.5;
+            const angleSpan = Math.PI * 2.0; // fan across full circle for maximum spread
+            insightNodes.forEach((n, index) => {
+                const offset = index - (insightNodes.length - 1) / 2;
+                const spacing = insightNodes.length > 1 ? (angleSpan / (insightNodes.length - 1)) : 0;
+                const angle = -angleSpan / 2 + offset * spacing;
+                n.x = Math.cos(angle) * insightRadius;
+                n.y = Math.sin(angle) * insightRadius - radius * 0.14;
+                n.vx = 0;
+                n.vy = 0;
+            });
+
+            const springLength = Math.max(160, Math.min(260, 420 / Math.sqrt(component.length || 1)));
             for (let step = 0; step < 420; step++) {
                 const alpha = 1 - step / 420;
                 for (let i = 0; i < component.length; i++) {
@@ -584,7 +732,10 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                         let dy = a.y - b.y;
                         let d2 = dx * dx + dy * dy + 16;
                         let d = Math.sqrt(d2);
-                        let force = (900 * alpha) / d2;
+                        let force = (1200 * alpha) / d2;
+                        // stronger short-range repulsion for insights-insights pairs
+                        if (a.kind === 'insights' && b.kind === 'insights') force *= 8.0;
+                        else if (a.kind === 'insights' || b.kind === 'insights') force *= 2.5;
                         let ux = dx / d;
                         let uy = dy / d;
                         a.vx += ux * force;
@@ -601,7 +752,9 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                     let dx = t.x - s.x;
                     let dy = t.y - s.y;
                     let d = Math.sqrt(dx * dx + dy * dy) || 1;
-                    let targetLength = e.sourceKind === 'writeup' || e.targetKind === 'writeup' ? springLength : springLength * 0.75;
+                    let targetLength = springLength * 0.78;
+                    if (e.sourceKind === 'insights' || e.targetKind === 'insights') targetLength = springLength * 1.95;
+                    else if (e.sourceKind === 'writeup' || e.targetKind === 'writeup') targetLength = springLength * 0.98;
                     let force = (d - targetLength) * 0.035 * alpha;
                     let fx = (dx / d) * force;
                     let fy = (dy / d) * force;
@@ -612,8 +765,8 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                 });
 
                 component.forEach(n => {
-                    n.vx += (0 - n.x) * 0.004 * alpha;
-                    n.vy += (0 - n.y) * 0.004 * alpha;
+                    n.vx += (0 - n.x) * 0.002 * alpha;
+                    n.vy += (0 - n.y) * 0.002 * alpha;
                     n.vx *= 0.82;
                     n.vy *= 0.82;
                     n.x += n.vx;
@@ -645,7 +798,7 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
                 };
             });
 
-            const gap = 110;
+            const gap = 640;
             const columns = Math.max(1, Math.ceil(Math.sqrt(boxes.length)));
             const columnWidths = Array(columns).fill(0);
             boxes.forEach((item, index) => {
@@ -686,7 +839,7 @@ def build_html(nodes: list[dict[str, object]], edges: list[dict[str, object]]) -
         }
 
         function fitViewBox() {
-            const padding = 90;
+            const padding = 120;
             const box = boundsFor(nodes);
             const minX = box.minX - padding;
             const minY = box.minY - padding;
@@ -838,6 +991,7 @@ def main() -> None:
                     'weight': 0.55 if node['kind'] == 'relations' or target_node['kind'] == 'relations' else 0.3,
                 }
             )
+    compute_insight_size_degrees(nodes, edges)
 
     html_text = build_html(nodes, edges)
     output_file.write_text(html_text, encoding='utf-8')

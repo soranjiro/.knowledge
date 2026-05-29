@@ -2,3 +2,10 @@ graph.html
 
 __pycache__/
 __pycache__/**
+
+insights/
+insights/**
+relations/
+relations/**
+writeup/
+writeup/**
